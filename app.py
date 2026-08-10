@@ -102,7 +102,7 @@ def get_relation_short(me_wx, target_wx):
     return "官"
 
 # ====================================================================
-# --- 干支历法 (嵌套五鼠遁满血版) ---
+# --- 干支历法 ---
 # ====================================================================
 class PreciseGanzhi:
     def __init__(self, dt):
@@ -134,7 +134,6 @@ class PreciseGanzhi:
         h_stem_idx = (rat_start + h_branch_idx) % 10
         self.hour_gz = GAN[h_stem_idx] + ZHI[h_branch_idx]
 
-        # 旬(刻)柱 与 分柱 嵌套算法
         minutes_from_23 = minute if hour == 23 else ((hour + 1) * 60 + minute)
         ke_offset = minutes_from_23 // 10
         fen_offset = minutes_from_23 % 10
@@ -152,7 +151,7 @@ class PreciseGanzhi:
         self.kongwang = f"{ZHI[(xun_branch_idx - 2) % 12]} {ZHI[(xun_branch_idx - 1) % 12]}"
 
 # ====================================================================
-# --- 排盘渲染 ---
+# --- 排盘渲染 (完美显示宽度对齐版) ---
 # ====================================================================
 class Hexagram:
     def __init__(self, lines, gz, question=""):
@@ -209,11 +208,23 @@ class Hexagram:
 
         m_name_disp = f"{self.main_name} {self.moving_lines_str}".strip()
         
-        # 移除了主宫前的“爻”列头，排版对齐
+        # 辅助函数：计算字符串的真实显示宽度（中文字符占2格，ASCII/空格占1格）
+        def get_dw(s):
+            return sum(2 if ord(c) > 127 else 1 for c in str(s))
+
+        # 辅助函数：按真实显示宽度进行右侧补空格对齐
+        def pad_dw(s, w):
+            s_str = str(s)
+            curr = get_dw(s_str)
+            if curr >= w:
+                return s_str
+            return s_str + " " * (w - curr)
+
+        # 顶部表头
         if has_change:
-            res.append(f"{'六神':<4} {'伏神':<12} {self.gong}宫{self.gong_num}: {m_name_disp:<8}   {self.c_gong}宫{self.c_gong_num}: {self.changed_name}")
+            res.append(f"{pad_dw('六神', 4)} {pad_dw('伏神', 14)}  {self.gong}宫{self.gong_num}: {m_name_disp:<8}   {self.c_gong}宫{self.c_gong_num}: {self.changed_name}")
         else:
-            res.append(f"{'六神':<4} {'伏神':<12} {self.gong}宫{self.gong_num}: {m_name_disp}")
+            res.append(f"{pad_dw('六神', 4)} {pad_dw('伏神', 14)}  {self.gong}宫{self.gong_num}: {m_name_disp}")
 
         symbols = {6: "‖×", 7: "│ ", 8: "‖ ", 9: "│◯"}
         for i in range(5, -1, -1):
@@ -222,12 +233,31 @@ class Hexagram:
             shi_ying = "世" if line_num == self.shi_pos else ("应" if line_num == self.ying_pos else "")
             
             fs_str = fushen.get(i, "")
-            main_str = f"{six_gods[i]:<4} {fs_str:<12} {line_num:<2} {get_relation_short(self.gong_wx, wx)} {m_najia[i]} {wx} {symbols[self.lines[i]]:<3} {shi_ying:<3}"
+            
+            # 各列严格控制显示宽度
+            col_god = pad_dw(six_gods[i], 4)
+            col_fs = pad_dw(fs_str, 14)
+            col_line = pad_dw(str(line_num), 2)
+            col_rel = pad_dw(get_relation_short(self.gong_wx, wx), 2)
+            col_najia = pad_dw(m_najia[i], 4)
+            col_wx = pad_dw(wx, 2)
+            col_sym = pad_dw(symbols[self.lines[i]], 3)
+            col_shi = pad_dw(shi_ying, 2)
+
+            main_str = f"{col_god} {col_fs} {col_line} {col_rel} {col_najia} {col_wx} {col_sym} {col_shi}"
 
             if has_change:
                 c_wx = ZHI_WX[c_najia[i][1]]
                 c_shi_ying = "世" if line_num == self.c_shi else ("应" if line_num == self.c_ying else "")
-                main_str += f"    {get_relation_short(self.c_gong_wx, c_wx)} {c_najia[i]} {c_wx} {'│' if self.changed_bits[i] == 1 else '‖':<2} {c_shi_ying:<2}"
+                
+                c_rel = pad_dw(get_relation_short(self.c_gong_wx, c_wx), 2)
+                c_najia_col = pad_dw(c_najia[i], 4)
+                c_wx_col = pad_dw(c_wx, 2)
+                c_sym_col = pad_dw(('│' if self.changed_bits[i] == 1 else '‖'), 2)
+                c_shi_col = pad_dw(c_shi_ying, 2)
+
+                main_str += f"    {c_rel} {c_najia_col} {c_wx_col} {c_sym_col} {c_shi_col}"
+                
             res.append(main_str)
         return "\n".join(res)
 
