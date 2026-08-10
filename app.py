@@ -3,7 +3,7 @@ import datetime, re, random, sqlite3
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
-    pass # Render Python 3.9+ 内置支持 zoneinfo
+    pass 
 
 app = Flask(__name__)
 DB_NAME = "liuyao.db"
@@ -93,7 +93,6 @@ NAJIA = {
 
 WX_REL = {"金": {"生": "水", "克": "木"}, "木": {"生": "火", "克": "土"}, "水": {"生": "木", "克": "火"}, "火": {"生": "土", "克": "金"}, "土": {"生": "金", "克": "水"}}
 ZHI_WX = {"子":"水", "丑":"土", "寅":"木", "卯":"木", "辰":"土", "巳":"火", "午":"火", "未":"土", "申":"金", "酉":"金", "戌":"土", "亥":"水"}
-REL_SHORT = {"父母": "父", "兄弟": "兄", "子孙": "子", "妻财": "财", "官鬼": "官"}
 
 def get_relation_short(me_wx, target_wx):
     if me_wx == target_wx: return "兄"
@@ -103,7 +102,7 @@ def get_relation_short(me_wx, target_wx):
     return "官"
 
 # ====================================================================
-# --- 干支历法 (精准重构版) ---
+# --- 干支历法 (嵌套五鼠遁满血版) ---
 # ====================================================================
 class PreciseGanzhi:
     def __init__(self, dt):
@@ -119,39 +118,56 @@ class PreciseGanzhi:
         m_branch_idx = (month - 2) if day >= solar_terms_day[month-1] else (month - 3)
         m_branch_idx %= 12
         tiger_start = ((y_stem_idx % 5) * 2 + 2) % 10
-        m_stem_idx = (tiger_start + m_branch_idx) % 10
-        self.month_gz = GAN[m_stem_idx] + ZHI[(m_branch_idx + 2) % 12]
+        self.month_gz = GAN[(tiger_start + m_branch_idx) % 10] + ZHI[(m_branch_idx + 2) % 12]
 
+        # 严格处理 23:00 (子时) 换日
+        bazi_date = dt.date()
+        if hour == 23:
+            bazi_date += datetime.timedelta(days=1)
+            
         anchor_date = datetime.date(2000, 1, 1)
-        delta_days = (datetime.date(year, month, day) - anchor_date).days
+        delta_days = (bazi_date - anchor_date).days
         d_stem_idx, d_branch_idx = (4 + delta_days) % 10, (6 + delta_days) % 12
         self.day_gz = GAN[d_stem_idx] + ZHI[d_branch_idx]
 
-        xun_branch_idx = (d_branch_idx - d_stem_idx) % 12
-        self.xun_shou = "甲" + ZHI[xun_branch_idx]
-        self.kongwang = f"{ZHI[(xun_branch_idx - 2) % 12]} {ZHI[(xun_branch_idx - 1) % 12]}"
-
+        # 时柱
         h_branch_idx = ((hour + 1) // 2) % 12
         rat_start = ((d_stem_idx % 5) * 2) % 10
         h_stem_idx = (rat_start + h_branch_idx) % 10
         self.hour_gz = GAN[h_stem_idx] + ZHI[h_branch_idx]
 
-        # 完美复刻专业软件的独特分柱算法：天干取分钟尾数，地支取时辰地支
-        f_stem_idx = minute % 10
-        self.fen_gz = GAN[f_stem_idx] + ZHI[h_branch_idx]
+        # --- 旬(刻)柱 与 分柱 嵌套核心算法 ---
+        # 1. 计算距昨晚 23:00 过了多少分钟
+        minutes_from_23 = minute if hour == 23 else ((hour + 1) * 60 + minute)
+        ke_offset = minutes_from_23 // 10  # 过了多少旬（刻）
+        fen_offset = minutes_from_23 % 10  # 过了多少分
+
+        # 2. 旬柱（刻柱）：按日干起五鼠遁
+        base_ke_idx = (d_stem_idx % 5) * 12
+        ke_idx = (base_ke_idx + ke_offset) % 60
+        k_stem_idx = ke_idx % 10
+        self.xun_gz = GAN[k_stem_idx] + ZHI[ke_idx % 12]
+
+        # 3. 分柱：按旬(刻)干起五鼠遁
+        base_fen_idx = (k_stem_idx % 5) * 12
+        fen_idx = (base_fen_idx + fen_offset) % 60
+        self.fen_gz = GAN[fen_idx % 10] + ZHI[fen_idx % 12]
+
+        # 空亡
+        xun_branch_idx = (d_branch_idx - d_stem_idx) % 12
+        self.kongwang = f"{ZHI[(xun_branch_idx - 2) % 12]} {ZHI[(xun_branch_idx - 1) % 12]}"
 
 # ====================================================================
-# --- 排盘渲染 (完美无死角版) ---
+# --- 排盘渲染 ---
 # ====================================================================
 class Hexagram:
     def __init__(self, lines, gz, question=""):
-        self.lines = lines # 从下到上 (爻1 -> 爻6)
+        self.lines = lines
         self.gz = gz
         self.question = question or "未填写"
         self.base_bits = [1 if x in [7, 9] else 0 for x in lines]
         self.change_flags = [1 if x in [6, 9] else 0 for x in lines]
         self.changed_bits = [1-b if c else b for b, c in zip(self.base_bits, self.change_flags)]
-        
         self.moving_lines_str = " ".join([str(i + 1) for i, x in enumerate(self.lines) if x in [6, 9]])
 
         self.main_name, self.gong, self.gong_wx, self.shi_pos, self.ying_pos, self.gong_num = self._parse_gua(self.base_bits)
@@ -161,89 +177,60 @@ class Hexagram:
             self.changed_name = ""
 
     def _parse_gua(self, bits):
-        # 翻转匹配，解决自下而上生成的爻象与自上而下八卦字典的错位Bug
         top_to_bottom = bits[::-1]
         for gong, g_list in GONG_DATA.items():
             for idx, (name, pattern) in enumerate(g_list):
                 if top_to_bottom == pattern:
                     shi_map = [6, 1, 2, 3, 4, 5, 4, 3]
                     shi = shi_map[idx]
-                    ying = (shi + 3) if shi <= 3 else (shi - 3)
-                    g_wx = BAGUA_MAP[tuple(pattern[3:])][1] if idx < 6 else BAGUA_MAP[tuple(pattern[:3])][1]
-                    return name, gong, g_wx, shi, ying, idx + 1
+                    return name, gong, BAGUA_MAP[tuple(pattern[3:])][1] if idx < 6 else BAGUA_MAP[tuple(pattern[:3])][1], shi, (shi + 3) if shi <= 3 else (shi - 3), idx + 1
         return "未知卦", "乾", "金", 6, 3, 1
 
     def _get_najia(self, bits):
-        # 兼容翻转后的八卦匹配
-        inner_bt, outer_bt = bits[:3], bits[3:]
-        inner_tb, outer_tb = tuple(inner_bt[::-1]), tuple(outer_bt[::-1])
-        in_gua, out_gua = BAGUA_MAP[inner_tb][0], BAGUA_MAP[outer_tb][0]
-        return NAJIA[in_gua][0] + NAJIA[out_gua][1]
+        inner_tb, outer_tb = tuple(bits[:3][::-1]), tuple(bits[3:][::-1])
+        return NAJIA[BAGUA_MAP[inner_tb][0]][0] + NAJIA[BAGUA_MAP[outer_tb][0]][1]
 
     def render_text(self):
         m_najia = self._get_najia(self.base_bits)
         has_change = any(self.change_flags)
         c_najia = self._get_najia(self.changed_bits) if has_change else [""] * 6
-
+        
         day_stem = self.gz.day_gz[0]
-        # 修复六神起法：精确映射
-        shen_start_map = {"甲":0, "乙":0, "丙":1, "丁":1, "戊":2, "己":3, "庚":4, "辛":4, "壬":5, "癸":5}
-        start_idx = shen_start_map[day_stem]
+        start_idx = {"甲":0, "乙":0, "丙":1, "丁":1, "戊":2, "己":3, "庚":4, "辛":4, "壬":5, "癸":5}[day_stem]
         six_gods = SHEN[start_idx:] + SHEN[:start_idx]
 
         fushen = {}
         if self.shi_pos != 6:
-            ben_pattern = GONG_DATA[self.gong][0][1]
-            ben_najia = self._get_najia(ben_pattern[::-1])
+            ben_najia = self._get_najia(GONG_DATA[self.gong][0][1][::-1])
             m_rels = [get_relation_short(self.gong_wx, ZHI_WX[gz[1]]) for gz in m_najia]
             for r in ["父", "兄", "子", "财", "官"]:
                 if r not in m_rels:
                     ben_rels = [get_relation_short(self.gong_wx, ZHI_WX[gz[1]]) for gz in ben_najia]
                     if r in ben_rels:
                         idx = ben_rels.index(r)
-                        gz = ben_najia[idx]
-                        fushen[idx] = f"{r} {gz} {ZHI_WX[gz[1]]}"
+                        fushen[idx] = f"{r} {ben_najia[idx]} {ZHI_WX[ben_najia[idx][1]]}"
 
-        res = []
-        res.append(f"问：{self.question}")
-        res.append(f"公历：{self.gz.dt.strftime('%Y年%m月%d日 %H:%M')}")
-        res.append(f"干支：{self.gz.year_gz}年 {self.gz.month_gz}月 {self.gz.day_gz}日 {self.gz.hour_gz}时 {self.gz.xun_shou}旬 {self.gz.fen_gz}分 (空亡: {self.gz.kongwang})\n")
+        res = [f"问：{self.question}", f"公历：{self.gz.dt.strftime('%Y年%m月%d日 %H:%M')}", 
+               f"干支：{self.gz.year_gz}年 {self.gz.month_gz}月 {self.gz.day_gz}日 {self.gz.hour_gz}时 {self.gz.xun_gz}旬 {self.gz.fen_gz}分 (空亡: {self.gz.kongwang})\n"]
 
-        # 拼接带标号的卦名
         m_name_disp = f"{self.main_name} {self.moving_lines_str}".strip()
-
         if has_change:
-            header = f"{'六神':<4} {'伏神':<12} {'爻':<3} {self.gong}宫{self.gong_num}: {m_name_disp:<8}   {self.c_gong}宫{self.c_gong_num}: {self.changed_name}"
+            res.append(f"{'六神':<4} {'伏神':<12} {'爻':<3} {self.gong}宫{self.gong_num}: {m_name_disp:<8}   {self.c_gong}宫{self.c_gong_num}: {self.changed_name}")
         else:
-            header = f"{'六神':<4} {'伏神':<12} {'爻':<3} {self.gong}宫{self.gong_num}: {m_name_disp}"
-        res.append(header)
+            res.append(f"{'六神':<4} {'伏神':<12} {'爻':<3} {self.gong}宫{self.gong_num}: {m_name_disp}")
 
         symbols = {6: "‖×", 7: "│ ", 8: "‖ ", 9: "│◯"}
-
         for i in range(5, -1, -1):
-            god = six_gods[i]
-            fu = fushen.get(i, "")
             line_num = i + 1
-
-            sym = symbols[self.lines[i]]
-            gz = m_najia[i]
-            wx = ZHI_WX[gz[1]]
-            rel = get_relation_short(self.gong_wx, wx)
+            wx = ZHI_WX[m_najia[i][1]]
             shi_ying = "世" if line_num == self.shi_pos else ("应" if line_num == self.ying_pos else "")
-
-            main_str = f"{god:<4} {fu:<12} {line_num:<3} {rel} {gz} {wx} {sym:<3} {shi_ying:<3}"
+            main_str = f"{six_gods[i]:<4} {fushen.get(i, ''):<12} {line_num:<3} {get_relation_short(self.gong_wx, wx)} {m_najia[i]} {wx} {symbols[self.lines[i]]:<3} {shi_ying:<3}"
 
             if has_change:
-                c_gz = c_najia[i]
-                c_wx = ZHI_WX[c_gz[1]]
-                c_rel = get_relation_short(self.c_gong_wx, c_wx)
-                c_sym = "│" if self.changed_bits[i] == 1 else "‖"
+                c_wx = ZHI_WX[c_najia[i][1]]
                 c_shi_ying = "世" if line_num == self.c_shi else ("应" if line_num == self.c_ying else "")
-                change_str = f"    {c_rel} {c_gz} {c_wx} {c_sym:<2} {c_shi_ying:<2}"
-                res.append(main_str + change_str)
-            else:
-                res.append(main_str)
-
+                main_str += f"    {get_relation_short(self.c_gong_wx, c_wx)} {c_najia[i]} {c_wx} {'│' if self.changed_bits[i] == 1 else '‖':<2} {c_shi_ying:<2}"
+            res.append(main_str)
         return "\n".join(res)
 
 # ====================================================================
@@ -255,25 +242,25 @@ def index():
 
 @app.route('/calculate', methods=['GET', 'POST'])
 def calculate():
-    # 增加这两行：如果是直接打开网址(GET)，就自动展示首页
     if request.method == 'GET':
         return render_template('index.html')
+
     q = request.form.get('question', '').strip()
     hex_raw = request.form.get('hex_lines', '').strip()
     manual_time_str = request.form.get('manual_time', '').strip()
-    is_dst = request.form.get('is_dst', '')
+    # 修复：兼容 HTML 勾选框传回的各种值
+    is_dst = str(request.form.get('is_dst', '')).strip().lower()
 
     if manual_time_str:
         try:
             dt = datetime.datetime.strptime(manual_time_str, '%Y-%m-%dT%H:%M')
-            if is_dst == '1':
+            if is_dst in ['1', 'on', 'true', 'yes', 'checked']:
                 dt = dt - datetime.timedelta(hours=1)
-                q += " (夏令时已扣减1小时)"
+                q += " (手动扣减夏令时1小时)"
         except ValueError:
-            dt = datetime.datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
+            dt, q = get_auto_time(q)
     else:
-        # 云端自动识别为美东时区
-        dt = datetime.datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
+        dt, q = get_auto_time(q)
 
     if hex_raw:
         try:
@@ -286,13 +273,20 @@ def calculate():
 
     try:
         lines_str = " ".join(map(str, lines))
-        gz_engine = PreciseGanzhi(dt)
-        result_text = Hexagram(lines, gz_engine, q).render_text()
-
+        result_text = Hexagram(lines, PreciseGanzhi(dt), q).render_text()
         save_to_db(q, lines_str, result_text)
         return render_template('index.html', result=result_text)
     except Exception as e:
         return render_template('index.html', result=f"运算异常: {e}")
+
+def get_auto_time(q_str):
+    # 智能识别服务器纽约时间，并判断当前是否处于夏令时区间
+    now_ny = datetime.datetime.now(ZoneInfo("America/New_York"))
+    auto_dt = now_ny.replace(tzinfo=None)
+    if now_ny.dst(): 
+        auto_dt = auto_dt - datetime.timedelta(hours=1)
+        q_str += " (系统已自动扣减夏令时1小时)"
+    return auto_dt, q_str.strip()
 
 @app.route('/history', methods=['GET'])
 def history():
