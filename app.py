@@ -120,7 +120,6 @@ class PreciseGanzhi:
         tiger_start = ((y_stem_idx % 5) * 2 + 2) % 10
         self.month_gz = GAN[(tiger_start + m_branch_idx) % 10] + ZHI[(m_branch_idx + 2) % 12]
 
-        # 严格处理 23:00 (子时) 换日
         bazi_date = dt.date()
         if hour == 23:
             bazi_date += datetime.timedelta(days=1)
@@ -130,30 +129,25 @@ class PreciseGanzhi:
         d_stem_idx, d_branch_idx = (4 + delta_days) % 10, (6 + delta_days) % 12
         self.day_gz = GAN[d_stem_idx] + ZHI[d_branch_idx]
 
-        # 时柱
         h_branch_idx = ((hour + 1) // 2) % 12
         rat_start = ((d_stem_idx % 5) * 2) % 10
         h_stem_idx = (rat_start + h_branch_idx) % 10
         self.hour_gz = GAN[h_stem_idx] + ZHI[h_branch_idx]
 
-        # --- 旬(刻)柱 与 分柱 嵌套核心算法 ---
-        # 1. 计算距昨晚 23:00 过了多少分钟
+        # 旬(刻)柱 与 分柱 嵌套算法
         minutes_from_23 = minute if hour == 23 else ((hour + 1) * 60 + minute)
-        ke_offset = minutes_from_23 // 10  # 过了多少旬（刻）
-        fen_offset = minutes_from_23 % 10  # 过了多少分
+        ke_offset = minutes_from_23 // 10
+        fen_offset = minutes_from_23 % 10
 
-        # 2. 旬柱（刻柱）：按日干起五鼠遁
         base_ke_idx = (d_stem_idx % 5) * 12
         ke_idx = (base_ke_idx + ke_offset) % 60
         k_stem_idx = ke_idx % 10
         self.xun_gz = GAN[k_stem_idx] + ZHI[ke_idx % 12]
 
-        # 3. 分柱：按旬(刻)干起五鼠遁
         base_fen_idx = (k_stem_idx % 5) * 12
         fen_idx = (base_fen_idx + fen_offset) % 60
         self.fen_gz = GAN[fen_idx % 10] + ZHI[fen_idx % 12]
 
-        # 空亡
         xun_branch_idx = (d_branch_idx - d_stem_idx) % 12
         self.kongwang = f"{ZHI[(xun_branch_idx - 2) % 12]} {ZHI[(xun_branch_idx - 1) % 12]}"
 
@@ -214,17 +208,21 @@ class Hexagram:
                f"干支：{self.gz.year_gz}年 {self.gz.month_gz}月 {self.gz.day_gz}日 {self.gz.hour_gz}时 {self.gz.xun_gz}旬 {self.gz.fen_gz}分 (空亡: {self.gz.kongwang})\n"]
 
         m_name_disp = f"{self.main_name} {self.moving_lines_str}".strip()
+        
+        # 移除了主宫前的“爻”列头，排版对齐
         if has_change:
-            res.append(f"{'六神':<4} {'伏神':<12} {'爻':<3} {self.gong}宫{self.gong_num}: {m_name_disp:<8}   {self.c_gong}宫{self.c_gong_num}: {self.changed_name}")
+            res.append(f"{'六神':<4} {'伏神':<12} {self.gong}宫{self.gong_num}: {m_name_disp:<8}   {self.c_gong}宫{self.c_gong_num}: {self.changed_name}")
         else:
-            res.append(f"{'六神':<4} {'伏神':<12} {'爻':<3} {self.gong}宫{self.gong_num}: {m_name_disp}")
+            res.append(f"{'六神':<4} {'伏神':<12} {self.gong}宫{self.gong_num}: {m_name_disp}")
 
         symbols = {6: "‖×", 7: "│ ", 8: "‖ ", 9: "│◯"}
         for i in range(5, -1, -1):
             line_num = i + 1
             wx = ZHI_WX[m_najia[i][1]]
             shi_ying = "世" if line_num == self.shi_pos else ("应" if line_num == self.ying_pos else "")
-            main_str = f"{six_gods[i]:<4} {fushen.get(i, ''):<12} {line_num:<3} {get_relation_short(self.gong_wx, wx)} {m_najia[i]} {wx} {symbols[self.lines[i]]:<3} {shi_ying:<3}"
+            
+            fs_str = fushen.get(i, "")
+            main_str = f"{six_gods[i]:<4} {fs_str:<12} {line_num:<2} {get_relation_short(self.gong_wx, wx)} {m_najia[i]} {wx} {symbols[self.lines[i]]:<3} {shi_ying:<3}"
 
             if has_change:
                 c_wx = ZHI_WX[c_najia[i][1]]
@@ -248,7 +246,6 @@ def calculate():
     q = request.form.get('question', '').strip()
     hex_raw = request.form.get('hex_lines', '').strip()
     manual_time_str = request.form.get('manual_time', '').strip()
-    # 修复：兼容 HTML 勾选框传回的各种值
     is_dst = str(request.form.get('is_dst', '')).strip().lower()
 
     if manual_time_str:
@@ -280,7 +277,6 @@ def calculate():
         return render_template('index.html', result=f"运算异常: {e}")
 
 def get_auto_time(q_str):
-    # 智能识别服务器纽约时间，并判断当前是否处于夏令时区间
     now_ny = datetime.datetime.now(ZoneInfo("America/New_York"))
     auto_dt = now_ny.replace(tzinfo=None)
     if now_ny.dst(): 
