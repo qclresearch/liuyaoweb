@@ -1,5 +1,9 @@
 from flask import Flask, render_template, request
 import datetime, re, random, sqlite3
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    pass # Render Python 3.9+ 内置支持 zoneinfo
 
 app = Flask(__name__)
 DB_NAME = "liuyao.db"
@@ -25,7 +29,7 @@ def init_db():
 def save_to_db(q, lines_str, result):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    now_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now_str = datetime.datetime.now(ZoneInfo("America/New_York")).strftime('%Y-%m-%d %H:%M:%S')
     cursor.execute('''
         INSERT INTO hexagram_history (create_time, question, hex_lines, result_text)
         VALUES (?, ?, ?, ?)
@@ -99,20 +103,18 @@ def get_relation_short(me_wx, target_wx):
     return "官"
 
 # ====================================================================
-# --- 干支历法 (含分柱) ---
+# --- 干支历法 (精准重构版) ---
 # ====================================================================
 class PreciseGanzhi:
     def __init__(self, dt):
         self.dt = dt
         year, month, day, hour, minute = dt.year, dt.month, dt.day, dt.hour, dt.minute
 
-        # 1. 年柱
         y_idx = year - 4
         if month < 2 or (month == 2 and day < 4): y_idx -= 1
         y_stem_idx, y_branch_idx = y_idx % 10, y_idx % 12
         self.year_gz = GAN[y_stem_idx] + ZHI[y_branch_idx]
 
-        # 2. 月柱
         solar_terms_day = [4, 6, 5, 5, 6, 7, 7, 7, 8, 8, 7, 6]
         m_branch_idx = (month - 2) if day >= solar_terms_day[month-1] else (month - 3)
         m_branch_idx %= 12
@@ -120,40 +122,37 @@ class PreciseGanzhi:
         m_stem_idx = (tiger_start + m_branch_idx) % 10
         self.month_gz = GAN[m_stem_idx] + ZHI[(m_branch_idx + 2) % 12]
 
-        # 3. 日柱 (以2000年1月1日 戊午日 为基准)
         anchor_date = datetime.date(2000, 1, 1)
         delta_days = (datetime.date(year, month, day) - anchor_date).days
         d_stem_idx, d_branch_idx = (4 + delta_days) % 10, (6 + delta_days) % 12
         self.day_gz = GAN[d_stem_idx] + ZHI[d_branch_idx]
 
-        # 4. 旬首与空亡
         xun_branch_idx = (d_branch_idx - d_stem_idx) % 12
         self.xun_shou = "甲" + ZHI[xun_branch_idx]
         self.kongwang = f"{ZHI[(xun_branch_idx - 2) % 12]} {ZHI[(xun_branch_idx - 1) % 12]}"
 
-        # 5. 时柱
         h_branch_idx = ((hour + 1) // 2) % 12
         rat_start = ((d_stem_idx % 5) * 2) % 10
         h_stem_idx = (rat_start + h_branch_idx) % 10
         self.hour_gz = GAN[h_stem_idx] + ZHI[h_branch_idx]
 
-        # 6. 分柱 (刻/分)
-        min_idx = minute // 10
-        f_stem_idx = (h_stem_idx * 2 + min_idx) % 10
-        f_branch_idx = (h_branch_idx + min_idx) % 12
-        self.fen_gz = GAN[f_stem_idx] + ZHI[f_branch_idx]
+        # 完美复刻专业软件的独特分柱算法：天干取分钟尾数，地支取时辰地支
+        f_stem_idx = minute % 10
+        self.fen_gz = GAN[f_stem_idx] + ZHI[h_branch_idx]
 
 # ====================================================================
-# --- 排盘渲染 (传统精简符号版) ---
+# --- 排盘渲染 (完美无死角版) ---
 # ====================================================================
 class Hexagram:
     def __init__(self, lines, gz, question=""):
-        self.lines = lines
+        self.lines = lines # 从下到上 (爻1 -> 爻6)
         self.gz = gz
         self.question = question or "未填写"
         self.base_bits = [1 if x in [7, 9] else 0 for x in lines]
         self.change_flags = [1 if x in [6, 9] else 0 for x in lines]
         self.changed_bits = [1-b if c else b for b, c in zip(self.base_bits, self.change_flags)]
+        
+        self.moving_lines_str = " ".join([str(i + 1) for i, x in enumerate(self.lines) if x in [6, 9]])
 
         self.main_name, self.gong, self.gong_wx, self.shi_pos, self.ying_pos, self.gong_num = self._parse_gua(self.base_bits)
         if any(self.change_flags):
@@ -162,19 +161,23 @@ class Hexagram:
             self.changed_name = ""
 
     def _parse_gua(self, bits):
+        # 翻转匹配，解决自下而上生成的爻象与自上而下八卦字典的错位Bug
+        top_to_bottom = bits[::-1]
         for gong, g_list in GONG_DATA.items():
             for idx, (name, pattern) in enumerate(g_list):
-                if bits == pattern:
+                if top_to_bottom == pattern:
                     shi_map = [6, 1, 2, 3, 4, 5, 4, 3]
                     shi = shi_map[idx]
                     ying = (shi + 3) if shi <= 3 else (shi - 3)
-                    g_wx = BAGUA_MAP[tuple(bits[3:])][1] if idx < 6 else BAGUA_MAP[tuple(bits[:3])][1]
+                    g_wx = BAGUA_MAP[tuple(pattern[3:])][1] if idx < 6 else BAGUA_MAP[tuple(pattern[:3])][1]
                     return name, gong, g_wx, shi, ying, idx + 1
         return "未知卦", "乾", "金", 6, 3, 1
 
     def _get_najia(self, bits):
-        inner, outer = tuple(bits[:3]), tuple(bits[3:])
-        in_gua, out_gua = BAGUA_MAP[inner][0], BAGUA_MAP[outer][0]
+        # 兼容翻转后的八卦匹配
+        inner_bt, outer_bt = bits[:3], bits[3:]
+        inner_tb, outer_tb = tuple(inner_bt[::-1]), tuple(outer_bt[::-1])
+        in_gua, out_gua = BAGUA_MAP[inner_tb][0], BAGUA_MAP[outer_tb][0]
         return NAJIA[in_gua][0] + NAJIA[out_gua][1]
 
     def render_text(self):
@@ -183,32 +186,38 @@ class Hexagram:
         c_najia = self._get_najia(self.changed_bits) if has_change else [""] * 6
 
         day_stem = self.gz.day_gz[0]
-        six_gods = SHEN[GAN.index(day_stem) % 6:] + SHEN[:GAN.index(day_stem) % 6]
+        # 修复六神起法：精确映射
+        shen_start_map = {"甲":0, "乙":0, "丙":1, "丁":1, "戊":2, "己":3, "庚":4, "辛":4, "壬":5, "癸":5}
+        start_idx = shen_start_map[day_stem]
+        six_gods = SHEN[start_idx:] + SHEN[:start_idx]
 
-        # 伏神计算
         fushen = {}
         if self.shi_pos != 6:
-            ben_najia = self._get_najia(GONG_DATA[self.gong][0][1])
+            ben_pattern = GONG_DATA[self.gong][0][1]
+            ben_najia = self._get_najia(ben_pattern[::-1])
             m_rels = [get_relation_short(self.gong_wx, ZHI_WX[gz[1]]) for gz in m_najia]
             for r in ["父", "兄", "子", "财", "官"]:
                 if r not in m_rels:
-                    idx = [get_relation_short(self.gong_wx, ZHI_WX[gz[1]]) for gz in ben_najia].index(r)
-                    gz = ben_najia[idx]
-                    fushen[idx] = f"{r} {gz} {ZHI_WX[gz[1]]}"
+                    ben_rels = [get_relation_short(self.gong_wx, ZHI_WX[gz[1]]) for gz in ben_najia]
+                    if r in ben_rels:
+                        idx = ben_rels.index(r)
+                        gz = ben_najia[idx]
+                        fushen[idx] = f"{r} {gz} {ZHI_WX[gz[1]]}"
 
         res = []
         res.append(f"问：{self.question}")
         res.append(f"公历：{self.gz.dt.strftime('%Y年%m月%d日 %H:%M')}")
         res.append(f"干支：{self.gz.year_gz}年 {self.gz.month_gz}月 {self.gz.day_gz}日 {self.gz.hour_gz}时 {self.gz.xun_shou}旬 {self.gz.fen_gz}分 (空亡: {self.gz.kongwang})\n")
 
-        # 顶部标题栏
+        # 拼接带标号的卦名
+        m_name_disp = f"{self.main_name} {self.moving_lines_str}".strip()
+
         if has_change:
-            header = f"{'六神':<4} {'伏神':<12} {'爻':<3} {self.gong}宫{self.gong_num}: {self.main_name:<8}   {self.c_gong}宫{self.c_gong_num}: {self.changed_name}"
+            header = f"{'六神':<4} {'伏神':<12} {'爻':<3} {self.gong}宫{self.gong_num}: {m_name_disp:<8}   {self.c_gong}宫{self.c_gong_num}: {self.changed_name}"
         else:
-            header = f"{'六神':<4} {'伏神':<12} {'爻':<3} {self.gong}宫{self.gong_num}: {self.main_name}"
+            header = f"{'六神':<4} {'伏神':<12} {'爻':<3} {self.gong}宫{self.gong_num}: {m_name_disp}"
         res.append(header)
 
-        # 爻象符号
         symbols = {6: "‖×", 7: "│ ", 8: "‖ ", 9: "│◯"}
 
         for i in range(5, -1, -1):
@@ -216,7 +225,6 @@ class Hexagram:
             fu = fushen.get(i, "")
             line_num = i + 1
 
-            # 本卦爻
             sym = symbols[self.lines[i]]
             gz = m_najia[i]
             wx = ZHI_WX[gz[1]]
@@ -225,7 +233,6 @@ class Hexagram:
 
             main_str = f"{god:<4} {fu:<12} {line_num:<3} {rel} {gz} {wx} {sym:<3} {shi_ying:<3}"
 
-            # 变卦爻
             if has_change:
                 c_gz = c_najia[i]
                 c_wx = ZHI_WX[c_gz[1]]
@@ -256,14 +263,14 @@ def calculate():
     if manual_time_str:
         try:
             dt = datetime.datetime.strptime(manual_time_str, '%Y-%m-%dT%H:%M')
+            if is_dst == '1':
+                dt = dt - datetime.timedelta(hours=1)
+                q += " (夏令时已扣减1小时)"
         except ValueError:
-            dt = datetime.datetime.now()
+            dt = datetime.datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
     else:
-        dt = datetime.datetime.now()
-
-    if is_dst == '1':
-        dt = dt - datetime.timedelta(hours=1)
-        q += " (夏令时已扣减1小时)"
+        # 云端自动识别为美东时区
+        dt = datetime.datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
 
     if hex_raw:
         try:
