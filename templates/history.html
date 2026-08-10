@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>历史排盘记录 - 量子意识六爻</title>
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; padding: 20px; background-color: #f0f2f5; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        h2 { text-align: center; color: #333; }
+        .record-card { border: 1px solid #e0e0e0; padding: 15px; margin-bottom: 20px; border-radius: 8px; background: #fafafa; }
+        .record-time { font-size: 12px; color: #888; margin-bottom: 8px; }
+        .record-title { font-size: 16px; font-weight: bold; color: #2c3e50; margin-bottom: 10px; }
+        .result-box { font-family: 'SimSun', monospace; font-size: 13px; line-height: 1.5; background: #fff; padding: 10px; border: 1px solid #ddd; white-space: pre; overflow-x: auto; border-radius: 4px; }
+        .btn-back { display: inline-block; padding: 8px 15px; background: #3498db; color: white; text-decoration: none; border-radius: 5px; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="btn-back">⬅ 返回起卦界面</a>
+        <h2>📜 历史卦象记录 (最近20条)</h2>
+        
+        {% if records %}
+            {% for item in records %}
+            <div class="record-card">
+                <div class="record-time">⏱ 起卦时间：{{ item[1] }}</div>
+                <div class="record-title">🎯 所测事情：{{ item[2] }}</div>
+                <div class="result-box">{{ item[3] }}</div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p style="text-align: center; color: #999;">暂无历史记录，去起一卦试试吧！</p>
+        {% endif %}
+    </div>
+</body>
+</html>

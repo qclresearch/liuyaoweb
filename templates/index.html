@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>量子意识六爻排盘 - 典藏网页版</title>
+    <style>
+        body {
+            font-family: 'Microsoft YaHei', sans-serif;
+            padding: 20px;
+            background-color: #f0f2f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: auto;
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        h2 { text-align: center; color: #333; }
+        .result-box {
+            font-family: 'SimSun', 'NSimSun', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            background-color: #fdfdfd;
+            border: 1px solid #d9d9d9;
+            padding: 15px;
+            white-space: pre; 
+            overflow-x: auto; 
+            border-radius: 5px;
+        }
+        input[type="text"], input[type="datetime-local"] {
+            padding: 10px;
+            margin: 8px 0;
+            font-size: 15px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            box-sizing: border-box;
+            width: 100%;
+        }
+        .btn-submit {
+            background-color: #4CAF50;
+            color: white;
+            font-weight: bold;
+            border: none;
+            cursor: pointer;
+            width: 100%;
+            padding: 12px;
+            margin-top: 15px;
+            transition: 0.3s;
+            border-radius: 5px;
+        }
+        .btn-submit:hover { background-color: #45a049; }
+        .btn-copy {
+            background-color: #f39c12;
+            color: white;
+            font-weight: bold;
+            border: none;
+            cursor: pointer;
+            width: 100%;
+            padding: 12px;
+            margin-top: 10px;
+            border-radius: 5px;
+        }
+        .btn-copy:hover { background-color: #d68910; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>☯ 量子意识六爻排盘</h2>
+<div style="text-align: center; margin-bottom: 20px;">
+    <a href="/history" style="color: #3498db; text-decoration: none; font-weight: bold;">📜 查看历史排盘记录</a>
+</div>
+        <form action="/calculate" method="POST">
+            <label><strong>所测事情：</strong></label>
+            <input type="text" name="question" placeholder="留空则自动标记">
+            
+            <label><strong>指定爻象 (手动起卦必填)：</strong></label>
+            <input type="text" name="hex_lines" placeholder="老阴6x, 7少阳, 8少阴, 9老阳o (空格隔开)">
+            
+            <label><strong>起卦时间 (选填)：</strong></label>
+            <input type="datetime-local" name="manual_time">
+            
+            <label style="font-size: 14px; color: #d35400; font-weight: bold; display: block; margin-top: 5px;">
+                <input type="checkbox" name="is_dst" value="1" style="transform: scale(1.2); margin-right: 5px;"> 启用夏令时 (自动扣减1小时)
+            </label>
+            
+            <button type="submit" class="btn-submit">开始排盘</button>
+        </form>
+
+        {% if result %}
+        <h3 style="margin-top: 30px; color: #555;">排盘结果：(手机请横屏查看)</h3>
+        <div class="result-box" id="gua-result">{{ result }}</div>
+        
+        <button onclick="copyResult()" class="btn-copy">📋 一键复制排盘结果</button>
+        
+        <script>
+        function copyResult() {
+            var content = document.getElementById('gua-result').innerText;
+            // 使用传统方法绕过 HTTP 安全限制
+            var textArea = document.createElement("textarea");
+            textArea.value = content;
+            // 确保文本域不在屏幕视野内
+            textArea.style.position = "fixed";
+            textArea.style.top = "-9999px";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            
+            try {
+                var successful = document.execCommand('copy');
+                if (successful) {
+                    alert('☯ 卦象已成功复制！\n可以直接去微信粘贴啦。');
+                } else {
+                    alert('哎呀，复制失败，请尝试长按文字手动复制。');
+                }
+            } catch (err) {
+                alert('您的浏览器不支持一键复制，请长按手动复制。');
+            }
+            document.body.removeChild(textArea);
+        }
+        </script>
+        {% endif %}
+    </div>
+</body>
+</html>
