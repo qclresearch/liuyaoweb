@@ -253,8 +253,11 @@ class Hexagram:
 def index():
     return render_template('index.html')
 
-@app.route('/calculate', methods=['POST'])
+@app.route('/calculate', methods=['GET', 'POST'])
 def calculate():
+    # 增加这两行：如果是直接打开网址(GET)，就自动展示首页
+    if request.method == 'GET':
+        return render_template('index.html')
     q = request.form.get('question', '').strip()
     hex_raw = request.form.get('hex_lines', '').strip()
     manual_time_str = request.form.get('manual_time', '').strip()
