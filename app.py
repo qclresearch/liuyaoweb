@@ -151,7 +151,7 @@ class PreciseGanzhi:
         self.kongwang = f"{ZHI[(xun_branch_idx - 2) % 12]} {ZHI[(xun_branch_idx - 1) % 12]}"
 
 # ====================================================================
-# --- 排盘渲染 (完美显示宽度对齐版) ---
+# --- 排盘渲染 (动爻及静卦0标记版) ---
 # ====================================================================
 class Hexagram:
     def __init__(self, lines, gz, question=""):
@@ -161,7 +161,10 @@ class Hexagram:
         self.base_bits = [1 if x in [7, 9] else 0 for x in lines]
         self.change_flags = [1 if x in [6, 9] else 0 for x in lines]
         self.changed_bits = [1-b if c else b for b, c in zip(self.base_bits, self.change_flags)]
-        self.moving_lines_str = " ".join([str(i + 1) for i, x in enumerate(self.lines) if x in [6, 9]])
+        
+        # 优化点：若无动爻则显示 "0"，有动爻则显示具体爻位数字
+        moving_indices = [str(i + 1) for i, x in enumerate(self.lines) if x in [6, 9]]
+        self.moving_lines_str = " ".join(moving_indices) if moving_indices else "0"
 
         self.main_name, self.gong, self.gong_wx, self.shi_pos, self.ying_pos, self.gong_num = self._parse_gua(self.base_bits)
         if any(self.change_flags):
@@ -208,11 +211,9 @@ class Hexagram:
 
         m_name_disp = f"{self.main_name} {self.moving_lines_str}".strip()
         
-        # 辅助函数：计算字符串的真实显示宽度（中文字符占2格，ASCII/空格占1格）
         def get_dw(s):
             return sum(2 if ord(c) > 127 else 1 for c in str(s))
 
-        # 辅助函数：按真实显示宽度进行右侧补空格对齐
         def pad_dw(s, w):
             s_str = str(s)
             curr = get_dw(s_str)
@@ -220,7 +221,6 @@ class Hexagram:
                 return s_str
             return s_str + " " * (w - curr)
 
-        # 顶部表头
         if has_change:
             res.append(f"{pad_dw('六神', 4)} {pad_dw('伏神', 14)}  {self.gong}宫{self.gong_num}: {m_name_disp:<8}   {self.c_gong}宫{self.c_gong_num}: {self.changed_name}")
         else:
@@ -234,7 +234,6 @@ class Hexagram:
             
             fs_str = fushen.get(i, "")
             
-            # 各列严格控制显示宽度
             col_god = pad_dw(six_gods[i], 4)
             col_fs = pad_dw(fs_str, 14)
             col_line = pad_dw(str(line_num), 2)
